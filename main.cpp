@@ -1,7 +1,9 @@
 #include "video.h"
+#include "ballTracking.h"
 
 int main() {
     try {
+        cv::ocl::setUseOpenCL(true);
         cv::VideoCapture vid240("white_240.mov");
         cv::VideoCapture vid162("yellow_162.mov");
 
@@ -10,29 +12,18 @@ int main() {
             return -1;
         }
 
-        // std::cout << "White Ball Vid:\n";
-        // double rangeBallFPS = computeFPS(vid240);
-        // std::cout << std::endl;
-
-        // std::cout << "Yellow Ball Vid:\n";
-        // double foamBallFPS = computeFPS(vid162);
-        // std::cout << std::endl;
-
-        // playPortraitVideo(vid240);
-
-        // int index = findImpactFrameIndex(vid240, 30);
-
-        // if (index > 0) {
-        //     vid240.set(cv::CAP_PROP_POS_FRAMES, index);
-        //     cv::Mat frame;
-        //     vid240.read(frame);
-        //     cv::imshow("Impact Frame", frame);
-        //     cv::waitKey(0);
-        // }
-
+        /********************************
+         *  vid240 impact frame = 497
+         *  vid162 impact frame = 149
+        ********************************/
+        int index = findImpactFrameIndex(vid240, computeFPS(vid240), 0.2);
+        displayFrame(vid240, index);
     }
     catch (const std::runtime_error& ex) {
         std::cerr << ex.what();
+    }
+    catch(const std::logic_error& ex2) {
+        std::cerr << ex2.what();
     }
 
     return 0;

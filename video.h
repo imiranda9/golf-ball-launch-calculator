@@ -8,13 +8,11 @@
 // Prints meta FPS and calculated FPS to console
 double computeFPS(cv::VideoCapture& cap);
 
-// in progress
-int findImpactFrameIndex(cv::VideoCapture& cap, double motionThreshold = 5.0);
+// Rotates video 90 degrees and plays in window
+// Press [esc] to exit
+void playVideo(cv::VideoCapture& cap);
 
-cv::Mat computeOpticalFlow(cv::VideoCapture& cap);
-
-// Plays video parameter in window, rotated 90 degrees
-// Press [esc] to exit window
-void playPortraitVideo(cv::VideoCapture& cap);
+// Rotates image 90 degrees and displays in window
+void displayFrame(cv:: VideoCapture& cap, int frameIndex);
 
 #endif
