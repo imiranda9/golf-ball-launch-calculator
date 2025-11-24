@@ -4,20 +4,32 @@
 int main() {
     try {
         cv::ocl::setUseOpenCL(true);
-        cv::VideoCapture vid240("white_240.mov");
-        cv::VideoCapture vid162("yellow_162.mov");
+        cv::VideoCapture vid("white_240.mov");
+        // cv::VideoCapture vid162("yellow_162.mov");
 
-        if (!vid240.isOpened() || !vid162.isOpened()) {
+        if (!vid.isOpened()) {
             std::cerr << "\nError: Cannot open video file.\n";
             return -1;
         }
 
         /********************************
-         *  vid240 impact frame = 497
+         *  vid240 impact frame = 498
          *  vid162 impact frame = 149
         ********************************/
-        int index = findImpactFrameIndex(vid240, computeFPS(vid240), 0.2);
-        displayFrame(vid240, index);
+        cv::Rect boundingBox = getBoundingBox(vid, 498);
+        // int index = findImpactFrameIndex(vid);
+        // cv::Rect boundingBox = getBoundingBox(vid, index);
+
+        vid.set(cv::CAP_PROP_POS_FRAMES, 498);
+        cv::Mat impactFrame;
+        vid.read(impactFrame);
+        cv::rectangle(impactFrame, boundingBox, cv::Scalar(0, 0, 255), 2);
+
+        cv::rotate(impactFrame, impactFrame, cv::ROTATE_90_CLOCKWISE);
+        cv::resize(impactFrame, impactFrame, cv::Size(), 0.4, 0.4);
+        cv::imshow("box?", impactFrame);
+        cv::waitKey(0);
+
     }
     catch (const std::runtime_error& ex) {
         std::cerr << ex.what();
