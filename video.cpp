@@ -1,5 +1,19 @@
 #include "video.h"
 
+bool isLandscape(cv::InputArray img) {
+    cv::Mat m = img.getMat();
+    return m.cols > m.rows;
+}
+
+bool isLandscape(cv::VideoCapture cap) {
+    cv::Mat frame;
+
+    if (!cap.read(frame))
+        throw std::runtime_error("\n[isLandscape]: Failed to read frame.");
+
+    return frame.cols > frame.rows;
+}
+
 double computeFPS(cv::VideoCapture& cap) {
     double metaFPS = cap.get(cv::CAP_PROP_FPS);
     int frameCount = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
@@ -19,7 +33,7 @@ double computeFPS(cv::VideoCapture& cap) {
     }
     double durationSec = (timestampLast - timestampFirst) / 1000;
     if (durationSec <= 0)
-        throw std::runtime_error("\n[ERROR]: Video data or read position invalid.\n");
+        throw std::runtime_error("\n[computeFPS]: Video data or read position invalid.");
 
     double calculatedFPS = frameCount / durationSec;
 
@@ -37,10 +51,12 @@ void playVideo(cv::VideoCapture& cap) {
     while (true) {
         if (!cap.read(frame) || frame.empty()) break;
 
-        cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
+        // if (isLandscape(frame))
+        //     cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
+
         cv::resize(frame, small, cv::Size(), 0.4, 0.4);
 
-        cv::imshow("", small);
+        cv::imshow("Video", small);
 
         // [esc] button to close window
         if (cv::waitKey(1) == 27) break;
@@ -48,11 +64,14 @@ void playVideo(cv::VideoCapture& cap) {
 }
 
 void displayFrame(cv:: VideoCapture& cap, int frameIndex) {
+    cv::Mat frame;
     cap.set(cv::CAP_PROP_POS_FRAMES, frameIndex);
-    cv::Mat frame, window;
     cap.read(frame);
-    cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
-    cv::resize(frame, window, cv::Size(), 0.4, 0.4);
-    cv::imshow("Impact Frame", window);
+
+    if (isLandscape(cap))
+        cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
+
+    cv::resize(frame, frame, cv::Size(), 0.4, 0.4);
+    cv::imshow("Frame", frame);
     cv::waitKey(0);
 }
