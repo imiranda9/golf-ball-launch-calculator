@@ -21,7 +21,7 @@ int findImpactFrameIndex(cv::VideoCapture& cap, double fps, double motionThresho
     cap.set(cv::CAP_PROP_POS_FRAMES, SKIP);
 
     if (!cap.read(prev))
-        throw std::runtime_error("\n[ERROR]: Video data or read position invalid.\n");
+        throw std::runtime_error("\n[findImpactFrameIndex]: Video data or read position invalid.");
 
     cv::cvtColor(prev, gray1, cv::COLOR_BGR2GRAY);
     cv::resize(gray1, gray1, cv::Size(), RESIZE_SCALE, RESIZE_SCALE, cv::INTER_AREA);
@@ -67,7 +67,7 @@ int findImpactFrameIndex(cv::VideoCapture& cap, double fps, double motionThresho
         frameIndex++;
     }
 
-    throw std::logic_error("[ERROR]: Failed to find impact frame.");
+    throw std::logic_error("\n[findImpactFrameIndex]: Failed to find impact frame.");
 }
 
 cv::Mat computeOpticalFlow(cv::VideoCapture& cap, int startFrame) {
@@ -76,12 +76,12 @@ cv::Mat computeOpticalFlow(cv::VideoCapture& cap, int startFrame) {
     cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
 
     if (!cap.read(frame1) || !cap.read(frame2))
-        throw std::runtime_error("\n[ERROR]: Failed to read two frames in optical flow calculation.\n");
+        throw std::runtime_error("\n[computeOpticalFlow]: Failed to read two frames.");
 
-    // Test vids are portrait forced into landscape. Rotation will account for that.
-    // Make an orientation parameter to decide whether to do this
-    cv::rotate(frame1, frame1, cv::ROTATE_90_CLOCKWISE);
-    cv::rotate(frame2, frame2, cv::ROTATE_90_CLOCKWISE);
+    // if (isLandscape(cap)) {
+    //     cv::rotate(frame1, frame1, cv::ROTATE_90_CLOCKWISE);
+    //     cv::rotate(frame2, frame2, cv::ROTATE_90_CLOCKWISE);
+    // }
 
     cv::cvtColor(frame1, gray1, cv::COLOR_BGR2GRAY);
     cv::cvtColor(frame2, gray2, cv::COLOR_BGR2GRAY);
@@ -144,32 +144,26 @@ cv::Mat computeColorMask(const cv::Mat& frame) {
 }
 
 cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double motionThreshold) {
+    bool rotate = isLandscape(cap);
     cap.set(cv::CAP_PROP_POS_FRAMES, impactFrameIndex);
 
     cv::Mat impactFrame;
     if (!cap.read(impactFrame))
-        throw std::runtime_error("\n[ERROR]: Failed to read impact frame.\n");
+        throw std::runtime_error("\n[getBoundingBox]: Failed to read frame.");
 
-    // Test vids are portrait forced into landscape. Rotation will account for that.
-    // Make an orientation parameter to decide whether to do this
-    cv::rotate(impactFrame, impactFrame, cv::ROTATE_90_CLOCKWISE);
-
-    int H = impactFrame.rows;
-    int W = impactFrame.cols;
+    int origH = impactFrame.rows;
+    int origW = impactFrame.cols;
 
     // Region of interest - bottom 40% of frame - look into making ratio a parameter
-    int roiY = static_cast<int>(H * 0.6);
-    int roiH = H - roiY;
-    cv::Rect ROI(0, roiY, W, roiH);
+    int roiY = static_cast<int>(origH * 0.6);
+    int roiH = origH - roiY;
+    cv::Rect ROI(0, roiY, origW, roiH);
 
     cv::Mat flowFull = computeOpticalFlow(cap, impactFrameIndex);
     cv::Mat flow = flowFull(ROI);
-
     cv::Mat motionMask = computeMotionMask(flow, motionThreshold);
-
     cv::Mat colorMaskFull = computeColorMask(impactFrame);
     cv::Mat colorMask = colorMaskFull(ROI);
-
     cv::Mat combinedMask;
     cv::bitwise_and(motionMask, colorMask, combinedMask);
 
@@ -177,7 +171,7 @@ cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double moti
     cv::findContours(combinedMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
     if (contours.empty())
-        throw std::runtime_error("\n[ERROR]: Ball region not found.");
+        throw std::runtime_error("\n[getBoundingBox]: Ball region not found.");
 
     // Find largest contour
     int bestIndex = 0;
@@ -192,15 +186,108 @@ cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double moti
     }
 
     cv::Rect box = cv::boundingRect(contours[bestIndex]);
-
-    // Unrotates bounding box
-    // Make an orientation parameter to decide whether to do this
     box.y += roiY;
-    int temp = box.x;
-    box.x = box.y;
-    box.y = (W - temp - box.width);
+
+    // Needs more testing for native landscape video
+    if (rotate) {
+        box = rotateBox90CW(box, origW, origH);
+        cv::rotate(impactFrame, impactFrame, cv::ROTATE_90_CLOCKWISE);
+    }
 
     cap.set(cv::CAP_PROP_POS_FRAMES, 0);
 
     return box;
+}
+
+std::vector<cv::Point2f> trackBallTrajectory(cv::VideoCapture& cap, int startFrame, cv::Rect initialBox) {
+    bool rotate = isLandscape(cap);
+
+    cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
+    cv::Mat frame;
+
+    if (!cap.read(frame) || frame.empty())
+        throw std::runtime_error("\n[trackBallTrajectory]: Failed to read frame.");
+
+    // if (isLandscape(cap)) {
+    //     box.y += roiY;
+    //     int temp = box.x;
+    //     box.x = box.y;
+    //     box.y = (W - temp - box.width);
+    // }
+
+    std::cout << "\nRotate Test Start\n";
+    if (rotate) {
+        int origW = frame.cols;   // before rotation
+        int origH = frame.rows;
+        cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
+
+        std::cout << "Frame: " << frame.cols << "x" << frame.rows << "\n";
+        std::cout << "Box:   " << initialBox << "\n";
+
+        initialBox = rotateBox90CW(initialBox, origW, origH);
+
+        std::cout << "Frame: " << frame.cols << "x" << frame.rows << "\n";
+        std::cout << "Box:   " << initialBox << "\n";
+    }
+    std::cout << "\nRotate Test End\n";
+    
+    cv::Ptr<cv::TrackerCSRT> tracker = cv::TrackerCSRT::create();
+
+    tracker->init(frame, initialBox);
+
+    std::vector<cv::Point2f> trajectory;
+
+    // Find center of bounding box
+    trajectory.emplace_back(
+        initialBox.x + initialBox.width * 0.5f,
+        initialBox.y + initialBox.height * 0.5f
+    );
+
+    while (true) {
+        if (!cap.read(frame) || frame.empty()) break;
+
+        if (rotate)
+            cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
+
+        cv::Rect box;
+        bool tracking = tracker->update(frame, box);
+        if (!tracking) break;
+
+        bool outOfFrame = (
+            box.x < 0 || box.y < 0 ||
+            box.x + box.width >= frame.cols ||
+            box.y + box.height >= frame.rows
+        );
+        if (outOfFrame) break;
+
+        // Draw box
+        cv::rectangle(frame, box, cv::Scalar(0, 0, 255), 2);
+
+        // Find center
+        cv::Point center(
+            box.x + box.width / 2,
+            box.y + box.height / 2
+        );
+
+        // Draw center
+        cv::circle(frame, center, 4, cv::Scalar(0, 0, 255), -1);
+        // Play video
+        cv::imshow("Tracking", frame);
+        if (cv::waitKey(1) == 27) break;
+
+        trajectory.emplace_back(center.x, center.y);
+    }
+
+    return trajectory;
+}
+
+cv::Rect rotateBox90CW(const cv::Rect& box, int origWidth, int origHeight) {
+    cv::Rect out;
+
+    out.x = box.y;
+    out.y = origWidth - (box.x + box.width);
+    out.width  = box.height;
+    out.height = box.width;
+
+    return out;
 }
