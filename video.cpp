@@ -51,8 +51,8 @@ void playVideo(cv::VideoCapture& cap) {
     while (true) {
         if (!cap.read(frame) || frame.empty()) break;
 
-        if (isLandscape(frame))
-            cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
+        // if (isLandscape(frame))
+        //     cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
 
         cv::resize(frame, small, cv::Size(), 0.4, 0.4);
 

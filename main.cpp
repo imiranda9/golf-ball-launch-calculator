@@ -10,15 +10,6 @@ int main() {
         if (!vid.isOpened())
             throw std::runtime_error("[main]: Failed to open video.");
 
-        // Rotate vid
-        cv::Mat f;
-
-        while (true) {
-            if (!vid.read(f) || f.empty()) break;
-            cv::rotate(f, f, cv::ROTATE_90_CLOCKWISE);
-        }
-        vid.set(cv::CAP_PROP_POS_FRAMES, 0);
-
         /********************************
          *  vid240 impact frame = 498
          *  vid162 impact frame = 149
@@ -26,9 +17,7 @@ int main() {
         // int index = findImpactFrameIndex(vid);
         // cv::Rect boundingBox = getBoundingBox(vid, index);
 
-        std::cout << "\nBox Test Start\n";
         cv::Rect boundingBox = getBoundingBox(vid, 498);
-        std::cout << "\nBox Test End\n";
 
         vid.set(cv::CAP_PROP_POS_FRAMES, 498);
         cv::Mat impactFrame;

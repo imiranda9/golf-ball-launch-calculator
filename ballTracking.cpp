@@ -78,11 +78,6 @@ cv::Mat computeOpticalFlow(cv::VideoCapture& cap, int startFrame) {
     if (!cap.read(frame1) || !cap.read(frame2))
         throw std::runtime_error("\n[computeOpticalFlow]: Failed to read two frames.");
 
-    // if (isLandscape(cap)) {
-    //     cv::rotate(frame1, frame1, cv::ROTATE_90_CLOCKWISE);
-    //     cv::rotate(frame2, frame2, cv::ROTATE_90_CLOCKWISE);
-    // }
-
     cv::cvtColor(frame1, gray1, cv::COLOR_BGR2GRAY);
     cv::cvtColor(frame2, gray2, cv::COLOR_BGR2GRAY);
 
@@ -91,7 +86,7 @@ cv::Mat computeOpticalFlow(cv::VideoCapture& cap, int startFrame) {
         OF_PYR_SCALE, OF_LEVELS, OF_WINSIZE, OF_ITERATIONS, OF_POLY_N, OF_POLY_SIGMA, OF_FLAGS
     );
 
-    // cap.set(cv::CAP_PROP_POS_FRAMES, 0);
+    cap.set(cv::CAP_PROP_POS_FRAMES, 0);
     return flow;
 }
 
@@ -151,17 +146,18 @@ cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double moti
     if (!cap.read(impactFrame))
         throw std::runtime_error("\n[getBoundingBox]: Failed to read frame.");
 
-    int origH = impactFrame.rows;
-    int origW = impactFrame.cols;
+    int H = impactFrame.rows;
+    int W = impactFrame.cols;
 
-    // Region of interest - bottom 40% of frame - look into making ratio a parameter
-    int roiY = static_cast<int>(origH * 0.6);
-    int roiH = origH - roiY;
-    cv::Rect ROI(0, roiY, origW, roiH);
+    // Region of interest - bottom 40% of frame
+    const float CROP_RATIO = 0.4;
+    int roiW = static_cast<int>(W * CROP_RATIO);
+    int roiX = W - roiW;
+    cv::Rect ROI(roiX, 0, roiW, H);
 
     cv::Mat flowFull = computeOpticalFlow(cap, impactFrameIndex);
     cv::Mat flow = flowFull(ROI);
-    cv::Mat motionMask = computeMotionMask(flow, motionThreshold);
+    cv::Mat motionMask = computeMotionMask(flow, 0.2);
     cv::Mat colorMaskFull = computeColorMask(impactFrame);
     cv::Mat colorMask = colorMaskFull(ROI);
     cv::Mat combinedMask;
@@ -186,13 +182,7 @@ cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double moti
     }
 
     cv::Rect box = cv::boundingRect(contours[bestIndex]);
-    box.y += roiY;
-
-    // Needs more testing for native landscape video
-    if (rotate) {
-        box = rotateBox90CW(box, origW, origH);
-        cv::rotate(impactFrame, impactFrame, cv::ROTATE_90_CLOCKWISE);
-    }
+    box.x += roiX;
 
     cap.set(cv::CAP_PROP_POS_FRAMES, 0);
 
@@ -200,58 +190,53 @@ cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double moti
 }
 
 std::vector<cv::Point2f> trackBallTrajectory(cv::VideoCapture& cap, int startFrame, cv::Rect initialBox) {
-    bool rotate = isLandscape(cap);
-
     cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
     cv::Mat frame;
 
+    // Check capture and reset
     if (!cap.read(frame) || frame.empty())
         throw std::runtime_error("\n[trackBallTrajectory]: Failed to read frame.");
-
-    // if (isLandscape(cap)) {
-    //     box.y += roiY;
-    //     int temp = box.x;
-    //     box.x = box.y;
-    //     box.y = (W - temp - box.width);
-    // }
-
-    std::cout << "\nRotate Test Start\n";
-    if (rotate) {
-        int origW = frame.cols;   // before rotation
-        int origH = frame.rows;
-        cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
-
-        std::cout << "Frame: " << frame.cols << "x" << frame.rows << "\n";
-        std::cout << "Box:   " << initialBox << "\n";
-
-        initialBox = rotateBox90CW(initialBox, origW, origH);
-
-        std::cout << "Frame: " << frame.cols << "x" << frame.rows << "\n";
-        std::cout << "Box:   " << initialBox << "\n";
-    }
-    std::cout << "\nRotate Test End\n";
+    cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
     
     cv::Ptr<cv::TrackerCSRT> tracker = cv::TrackerCSRT::create();
+
+    // Expand box around the ball
+    int pad = 30;   // try 12–20 pixels
+    initialBox.x      = std::max(0, initialBox.x - pad);
+    initialBox.y      = std::max(0, initialBox.y - pad);
+    initialBox.width  = std::min(frame.cols - initialBox.x, initialBox.width  + pad * 2);
+    initialBox.height = std::min(frame.rows - initialBox.y, initialBox.height + pad * 2);
 
     tracker->init(frame, initialBox);
 
     std::vector<cv::Point2f> trajectory;
 
+    cv::Rect prevBox = initialBox;
+
     // Find center of bounding box
     trajectory.emplace_back(
-        initialBox.x + initialBox.width * 0.5f,
-        initialBox.y + initialBox.height * 0.5f
+        initialBox.x + initialBox.width / 2,
+        initialBox.y + initialBox.height / 2
     );
 
     while (true) {
         if (!cap.read(frame) || frame.empty()) break;
 
-        if (rotate)
-            cv::rotate(frame, frame, cv::ROTATE_90_CLOCKWISE);
-
         cv::Rect box;
         bool tracking = tracker->update(frame, box);
         if (!tracking) break;
+
+        cv::Mat colorMaskFull = computeColorMask(frame);
+        cv::Rect safeBox = box & cv::Rect(0, 0, frame.cols, frame.rows);
+        if (safeBox.area() <= 0) break;
+        cv::Mat maskROI = colorMaskFull(safeBox);
+
+        double ballInROI = cv::mean(maskROI)[0];
+
+        if (ballInROI < 0.3)
+            box = prevBox;
+        else
+            prevBox = box;
 
         bool outOfFrame = (
             box.x < 0 || box.y < 0 ||
@@ -260,18 +245,13 @@ std::vector<cv::Point2f> trackBallTrajectory(cv::VideoCapture& cap, int startFra
         );
         if (outOfFrame) break;
 
-        // Draw box
-        cv::rectangle(frame, box, cv::Scalar(0, 0, 255), 2);
-
         // Find center
         cv::Point center(
-            box.x + box.width / 2,
+            box.x+ box.width / 2,
             box.y + box.height / 2
         );
 
-        // Draw center
-        cv::circle(frame, center, 4, cv::Scalar(0, 0, 255), -1);
-        // Play video
+        cv::rectangle(frame, box, cv::Scalar(0, 0, 255), 2);
         cv::imshow("Tracking", frame);
         if (cv::waitKey(1) == 27) break;
 
@@ -279,15 +259,4 @@ std::vector<cv::Point2f> trackBallTrajectory(cv::VideoCapture& cap, int startFra
     }
 
     return trajectory;
-}
-
-cv::Rect rotateBox90CW(const cv::Rect& box, int origWidth, int origHeight) {
-    cv::Rect out;
-
-    out.x = box.y;
-    out.y = origWidth - (box.x + box.width);
-    out.width  = box.height;
-    out.height = box.width;
-
-    return out;
 }
