@@ -18,7 +18,7 @@ cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double moti
 
 std::vector<cv::Point2f> trackBallTrajectory(cv::VideoCapture& cap, int startFrame, cv::Rect initialBox);
 
-cv::Rect rotateBox90CW(const cv::Rect& box, int origWidth, int origHeight);
+cv::Point2f computeCenter(const std::vector<cv::Point2f>& points);
 
 
 #endif

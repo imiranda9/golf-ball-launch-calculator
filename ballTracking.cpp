@@ -189,74 +189,150 @@ cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double moti
     return box;
 }
 
+
+// USE DIFFERENT TRACKING
 std::vector<cv::Point2f> trackBallTrajectory(cv::VideoCapture& cap, int startFrame, cv::Rect initialBox) {
     cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
-    cv::Mat frame;
+    cv::Mat frame, prevGray;
 
     // Check capture and reset
     if (!cap.read(frame) || frame.empty())
         throw std::runtime_error("\n[trackBallTrajectory]: Failed to read frame.");
     cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
     
-    cv::Ptr<cv::TrackerCSRT> tracker = cv::TrackerCSRT::create();
+    cv::cvtColor(frame, prevGray, cv::COLOR_BGR2GRAY);
 
-    // Expand box around the ball
-    int pad = 30;   // try 12–20 pixels
-    initialBox.x      = std::max(0, initialBox.x - pad);
-    initialBox.y      = std::max(0, initialBox.y - pad);
-    initialBox.width  = std::min(frame.cols - initialBox.x, initialBox.width  + pad * 2);
-    initialBox.height = std::min(frame.rows - initialBox.y, initialBox.height + pad * 2);
+    // ============ Prepare initial ROI =========
+    cv::Rect safeBox = initialBox & cv::Rect(0, 0, frame.cols, frame.rows);
+    if (safeBox.area() <= 0)
+        throw std::runtime_error("\n[trackBallTrajectory]: initialBox out of bounds.");
+    
+    cv::Mat roi = prevGray(safeBox);
 
-    tracker->init(frame, initialBox);
+    std::vector<cv::Point2f> ptsLocal;
+    const int MAX_CORNERS = 40;
+    const double QUALITY = 0.01;
+    const double MIN_DISTANCE = 2.0;
 
-    std::vector<cv::Point2f> trajectory;
-
-    cv::Rect prevBox = initialBox;
-
-    // Find center of bounding box
-    trajectory.emplace_back(
-        initialBox.x + initialBox.width / 2,
-        initialBox.y + initialBox.height / 2
+    cv::goodFeaturesToTrack(
+        roi, ptsLocal,
+        MAX_CORNERS, QUALITY, MIN_DISTANCE
     );
+
+    if (ptsLocal.empty())
+        throw std::runtime_error("\n[trackBallTrajectory]: No features found in initialBox.");
+
+    std::vector<cv::Point2f> ptsPrev;
+    ptsPrev.reserve(ptsLocal.size());
+    for (size_t i = 0; i < ptsLocal.size(); i++) {
+        ptsPrev.emplace_back(ptsLocal[i].x + safeBox.x, ptsLocal[i].y + safeBox.y);
+    }
+
+    // ========== Prepare output trajectory
+    std::vector<cv::Point2f> trajectory;
+    cv::Point2f center = computeCenter(ptsPrev);
+    trajectory.push_back(center);
+
+    // ========= Tracking loop ========
+    cv::Mat gray;
+    cv::Size windowSize(124, 124);
+    int pyramidLevels = 9;
 
     while (true) {
         if (!cap.read(frame) || frame.empty()) break;
+        cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
 
-        cv::Rect box;
-        bool tracking = tracker->update(frame, box);
-        if (!tracking) break;
+        // ============== Run Optical Flow
+        std::vector<cv::Point2f> ptsNext;
+        std::vector<unsigned char> status;
+        std::vector<float> err;
 
-        cv::Mat colorMaskFull = computeColorMask(frame);
-        cv::Rect safeBox = box & cv::Rect(0, 0, frame.cols, frame.rows);
-        if (safeBox.area() <= 0) break;
-        cv::Mat maskROI = colorMaskFull(safeBox);
-
-        double ballInROI = cv::mean(maskROI)[0];
-
-        if (ballInROI < 0.3)
-            box = prevBox;
-        else
-            prevBox = box;
-
-        bool outOfFrame = (
-            box.x < 0 || box.y < 0 ||
-            box.x + box.width >= frame.cols ||
-            box.y + box.height >= frame.rows
-        );
-        if (outOfFrame) break;
-
-        // Find center
-        cv::Point center(
-            box.x+ box.width / 2,
-            box.y + box.height / 2
+        cv::calcOpticalFlowPyrLK(
+            prevGray, gray,
+            ptsPrev, ptsNext,
+            status, err,
+            windowSize,
+            pyramidLevels,
+            cv::TermCriteria(cv::TermCriteria::COUNT | cv::TermCriteria::EPS, 40, 0.01)
         );
 
-        cv::rectangle(frame, box, cv::Scalar(0, 0, 255), 2);
+        // ============== Filter valid tracked points
+        std::vector<cv::Point2f> ptsGood;
+        for (size_t i = 0; i < ptsNext.size(); i++) {
+            if (!status[i]) continue;
+            if (ptsNext[i].x < 0 || ptsNext[i].x >= frame.cols) continue;
+            if (ptsNext[i].y < 0 || ptsNext[i].y >= frame.rows) continue;
+            ptsGood.push_back(ptsNext[i]);
+        }
+
+        // ============ Reseed new features if too few points survive
+        if (ptsGood.size() < 5) {
+            int boxSize = 30;
+            cv::Rect reseedBox(
+                std::max(0, (int)center.x - boxSize / 2),
+                std::max(0, (int)center.y - boxSize / 2),
+                boxSize, boxSize
+            );
+
+            reseedBox = reseedBox & cv::Rect(0, 0, frame.cols, frame.rows);
+
+            std::vector<cv::Point2f> newLocal;
+            cv::goodFeaturesToTrack(
+                gray(reseedBox), newLocal,
+                MAX_CORNERS, QUALITY, MIN_DISTANCE
+            );
+
+            ptsGood.clear();
+            for (size_t i = 0; i < newLocal.size(); i++) {
+                ptsGood.emplace_back(newLocal[i].x + reseedBox.x, newLocal[i].y + reseedBox.y);
+            }
+
+            if (ptsGood.empty()) break;
+        }
+
+        // ========== Find center from good points
+        cv::Point2f center = computeCenter(ptsGood);
+        trajectory.push_back(center);
+        
+        // ========== DISPLAY
+        cv::circle(frame, center, 4, cv::Scalar(0, 255, 0), -1);
+
+        cv::rectangle(
+            frame,
+            cv::Rect(center.x - 8, center.y - 8, 16, 16),
+            cv::Scalar(0, 0, 255),
+            2
+        );
+
+        // Draw tracked points
+        for (size_t i = 0; i < ptsGood.size(); i++) {
+            cv::circle(frame, ptsGood[i], 2, cv::Scalar(255, 0, 0), -1);
+        }
+
         cv::imshow("Tracking", frame);
         if (cv::waitKey(1) == 27) break;
 
-        trajectory.emplace_back(center.x, center.y);
+
+        ptsPrev = ptsGood;
+        prevGray = gray.clone();
     }
 
     return trajectory;
+}
+
+cv::Point2f computeCenter(const std::vector<cv::Point2f>& points) {
+    if (points.empty()) return cv::Point2f(0.0f, 0.0f);
+
+    float sumX = 0.0f;
+    float sumY = 0.0f;
+
+    for (size_t i = 0; i < points.size(); i++) {
+        sumX += points[i].x;
+        sumY += points[i].y;
+    }
+
+    float centerX = sumX / points.size();
+    float centerY = sumY / points.size();
+
+    return cv::Point2f(centerX, centerY);
 }

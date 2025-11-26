@@ -4,11 +4,6 @@
 #include <opencv2/opencv.hpp>
 #include <iostream>
 
-enum Orientation {
-    LANDSCAPE = 0,
-    PORTRAIT = 1
-};
-
 bool isLandscape(cv::InputArray img);
 
 bool isLandscape(cv::VideoCapture cap);
