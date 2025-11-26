@@ -23,12 +23,12 @@ int main() {
         cv::Mat impactFrame;
         vid.read(impactFrame);
         cv::rectangle(impactFrame, boundingBox, cv::Scalar(0, 0, 255), 2);
-        cv::rotate(impactFrame, impactFrame, cv::ROTATE_90_CLOCKWISE);
-        cv::resize(impactFrame, impactFrame, cv::Size(), 0.4, 0.4);
+        // cv::rotate(impactFrame, impactFrame, cv::ROTATE_90_CLOCKWISE);
+        // cv::resize(impactFrame, impactFrame, cv::Size(), 0.4, 0.4);
         cv::imshow("box?", impactFrame);
         cv::waitKey(0);
 
-        std::vector<cv::Point2f> test = trackBallTrajectory(vid, 498, boundingBox);
+        std::vector<cv::Point2f> trajectory = trackBallTrajectory(vid, 498, boundingBox);
     }
     catch (const std::runtime_error& ex) {
         std::cerr << ex.what();

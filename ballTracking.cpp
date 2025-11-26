@@ -90,6 +90,20 @@ cv::Mat computeOpticalFlow(cv::VideoCapture& cap, int startFrame) {
     return flow;
 }
 
+cv::Mat computeOpticalFlow(const cv::Mat& frame1, const cv::Mat& frame2) {
+    cv::Mat gray1, gray2;
+    cv::cvtColor(frame1, gray1, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(frame2, gray2, cv::COLOR_BGR2GRAY);
+
+    cv::Mat flow;
+    cv::calcOpticalFlowFarneback(
+        gray1, gray2, flow,
+        OF_PYR_SCALE, OF_LEVELS, OF_WINSIZE, OF_ITERATIONS, OF_POLY_N, OF_POLY_SIGMA, OF_FLAGS
+    );
+
+    return flow;
+}
+
 cv::Mat computeMotionMask(const cv::Mat& flow, double motionThreshold) {
     // Split motion into two images
     cv::Mat xy[2];
@@ -139,7 +153,6 @@ cv::Mat computeColorMask(const cv::Mat& frame) {
 }
 
 cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double motionThreshold) {
-    bool rotate = isLandscape(cap);
     cap.set(cv::CAP_PROP_POS_FRAMES, impactFrameIndex);
 
     cv::Mat impactFrame;
@@ -189,73 +202,98 @@ cv::Rect getBoundingBox(cv::VideoCapture& cap, int impactFrameIndex, double moti
     return box;
 }
 
-std::vector<cv::Point2f> trackBallTrajectory(cv::VideoCapture& cap, int startFrame, cv::Rect initialBox) {
-    cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
-    cv::Mat frame;
+cv::Point2f getBoundingBoxPoint(cv::VideoCapture& cap, int impactFrameIndex, double motionThreshold) {
+    cap.set(cv::CAP_PROP_POS_FRAMES, impactFrameIndex);
 
-    // Check capture and reset
-    if (!cap.read(frame) || frame.empty())
-        throw std::runtime_error("\n[trackBallTrajectory]: Failed to read frame.");
-    cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
-    
-    cv::Ptr<cv::TrackerCSRT> tracker = cv::TrackerCSRT::create();
+    cv::Mat impactFrame;
+    if (!cap.read(impactFrame))
+        throw std::runtime_error("\n[getBoundingBox]: Failed to read frame.");
 
-    // Expand box around the ball
-    int pad = 30;   // try 12–20 pixels
-    initialBox.x      = std::max(0, initialBox.x - pad);
-    initialBox.y      = std::max(0, initialBox.y - pad);
-    initialBox.width  = std::min(frame.cols - initialBox.x, initialBox.width  + pad * 2);
-    initialBox.height = std::min(frame.rows - initialBox.y, initialBox.height + pad * 2);
+    int H = impactFrame.rows;
+    int W = impactFrame.cols;
 
-    tracker->init(frame, initialBox);
+    // Region of interest - bottom 40% of frame
+    const float CROP_RATIO = 0.45;
+    int roiW = static_cast<int>(W * CROP_RATIO);
+    int roiX = W - roiW;
+    cv::Rect ROI(roiX, 0, roiW, H);
 
-    std::vector<cv::Point2f> trajectory;
+    cv::Mat flowFull = computeOpticalFlow(cap, impactFrameIndex);
+    cv::Mat flow = flowFull(ROI);
+    cv::Mat motionMask = computeMotionMask(flow, 0.2);
+    cv::Mat colorMaskFull = computeColorMask(impactFrame);
+    cv::Mat colorMask = colorMaskFull(ROI);
+    cv::Mat combinedMask;
+    cv::bitwise_and(motionMask, colorMask, combinedMask);
 
-    cv::Rect prevBox = initialBox;
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(combinedMask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    // Find center of bounding box
-    trajectory.emplace_back(
-        initialBox.x + initialBox.width / 2,
-        initialBox.y + initialBox.height / 2
+    if (contours.empty())
+        throw std::runtime_error("\n[getBoundingBox]: Ball region not found.");
+
+    // Ignore contours much larger than ball
+    const int MAX_BALL_WIDTH = 22;
+    int bestIndex = 0;
+    double bestArea = 0.0;
+
+    for (int i = 0; i < contours.size(); i++) {
+        double area = cv::contourArea(contours[i]);
+
+        cv::Rect boxLocal = cv::boundingRect(contours[i]);
+        if (boxLocal.width > MAX_BALL_WIDTH) continue;
+
+        if (area > bestArea) {
+            bestArea = area;
+            bestIndex = i;
+        }
+    }
+
+    cv::Rect box = cv::boundingRect(contours[bestIndex]);
+    box.x += roiX;
+
+    cv::Point2f center(
+        box.x + box.width * 0.5f,
+        box.y + box.height * 0.5f
     );
 
+    cap.set(cv::CAP_PROP_POS_FRAMES, 0);
+
+    return center;
+}
+
+std::vector<cv::Point2f> trackBallTrajectory(cv::VideoCapture& cap, int startFrame, cv::Rect initialBox) {
+    const double MOTION_THRESHOLD = 0.15;
+
+    cap.set(cv::CAP_PROP_POS_FRAMES, startFrame);
+
+    int frameIndex = startFrame;
+    std::vector<cv::Point2f> trajectory;
+
     while (true) {
+        cv::Mat frame;
         if (!cap.read(frame) || frame.empty()) break;
 
-        cv::Rect box;
-        bool tracking = tracker->update(frame, box);
-        if (!tracking) break;
+        int savedIndex = (int)cap.get(cv::CAP_PROP_POS_FRAMES);
 
-        cv::Mat colorMaskFull = computeColorMask(frame);
-        cv::Rect safeBox = box & cv::Rect(0, 0, frame.cols, frame.rows);
-        if (safeBox.area() <= 0) break;
-        cv::Mat maskROI = colorMaskFull(safeBox);
+        cv::Point2f center;
 
-        double ballInROI = cv::mean(maskROI)[0];
+        try {
+            center = getBoundingBoxPoint(cap, savedIndex - 1, MOTION_THRESHOLD);
+        }
+        catch (...) {
+            break;
+        }
 
-        if (ballInROI < 0.3)
-            box = prevBox;
-        else
-            prevBox = box;
+        trajectory.push_back(center);
 
-        bool outOfFrame = (
-            box.x < 0 || box.y < 0 ||
-            box.x + box.width >= frame.cols ||
-            box.y + box.height >= frame.rows
-        );
-        if (outOfFrame) break;
-
-        // Find center
-        cv::Point center(
-            box.x+ box.width / 2,
-            box.y + box.height / 2
-        );
-
-        cv::rectangle(frame, box, cv::Scalar(0, 0, 255), 2);
-        cv::imshow("Tracking", frame);
+        cv::circle(frame, center, 5, cv::Scalar(240, 19, 255), -1);
+        cv::imshow("BallTracking", frame);
         if (cv::waitKey(1) == 27) break;
 
-        trajectory.emplace_back(center.x, center.y);
+        cap.set(cv::CAP_PROP_POS_FRAMES, savedIndex);
+
+        frameIndex;
     }
 
     return trajectory;
