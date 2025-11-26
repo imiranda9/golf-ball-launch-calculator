@@ -1,19 +1,5 @@
 #include "video.h"
 
-bool isLandscape(cv::InputArray img) {
-    cv::Mat m = img.getMat();
-    return m.cols > m.rows;
-}
-
-bool isLandscape(cv::VideoCapture cap) {
-    cv::Mat frame;
-
-    if (!cap.read(frame))
-        throw std::runtime_error("\n[isLandscape]: Failed to read frame.");
-
-    return frame.cols > frame.rows;
-}
-
 double computeFPS(cv::VideoCapture& cap) {
     double metaFPS = cap.get(cv::CAP_PROP_FPS);
     int frameCount = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));

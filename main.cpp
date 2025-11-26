@@ -28,7 +28,7 @@ int main() {
         cv::imshow("box?", impactFrame);
         cv::waitKey(0);
 
-        std::vector<cv::Point2f> test = trackBallTrajectory(vid, 498, boundingBox);
+        std::vector<cv::Point2f> trajectory = trackBallTrajectory(vid, 498, boundingBox);
     }
     catch (const std::runtime_error& ex) {
         std::cerr << ex.what();
