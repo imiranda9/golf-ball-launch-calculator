@@ -36,13 +36,19 @@ void playVideo(cv::VideoCapture& cap) {
         cv::imshow("Video", small);
         if (cv::waitKey(1) == 27) break;
     }
+
+    cap.set(cv::CAP_PROP_POS_FRAMES, 0);
 }
 
 void displayFrame(cv:: VideoCapture& cap, int frameIndex) {
-    cv::Mat frame;
     cap.set(cv::CAP_PROP_POS_FRAMES, frameIndex);
+    cv::Mat frame;
+    if (!cap.read(frame) || frame.empty())
+        throw std::runtime_error("\n[displayFrame]: Could not read frame.");
 
     cv::resize(frame, frame, cv::Size(), 0.4, 0.4);
     cv::imshow("Frame", frame);
     cv::waitKey(0);
+    
+    cap.set(cv::CAP_PROP_POS_FRAMES, 0);
 }

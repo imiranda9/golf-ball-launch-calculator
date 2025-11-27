@@ -1,11 +1,33 @@
+/**
+ * @file main.cpp
+ * @brief Full golf ball tracking pipeline.
+ *
+ * This program performs the following steps:
+ *  1. Enables OpenCL acceleration in OpenCV (if available).
+ *  2. Opens the input video file (sample_video.mov).
+ *  3. Computes the true video FPS using timestamp analysis.
+ *  4. Detects the impact frame where the golf ball begins moving.
+ *  5. Computes an initial bounding box around the ball at impact.
+ *  6. Tracks the ball forward through the video to build a trajectory.
+ *  7. Rotates tracked pointsand filters noisy points.
+ *  8. Estimates carry distance and launch angle from the trajectory.
+ *
+ * The results (carry distance in meters and launch angle in degrees)
+ * are printed to stdout.
+ */
+
+#include <iostream>
+#include <opencv2/core/ocl.hpp>
 #include "video.h"
+#include "ballLocate.h"
 #include "ballTracking.h"
 
 int main() {
     try {
+        // Use GPU acceleration if possible
         cv::ocl::setUseOpenCL(true);
-        cv::VideoCapture vid("vid240.mov");
 
+        cv::VideoCapture vid("../assets/sample_video.mov");
         if (!vid.isOpened())
             throw std::runtime_error("[main]: Failed to open video.");
 
@@ -24,8 +46,8 @@ int main() {
         std::cout << "DONE\n";
 
         std::cout << "Tracking Ball Trajectory: ";
-        std::vector<PosFrame> trackedPoints = getBallTrajectory(vid, impactIndex, boundingBox);
-        rotatePointVector(trackedPoints, frameHeight);
+        std::vector<PosFrame> trackedPoints = getBallTrajectory(vid, impactIndex);
+        rotatePointVector(trackedPoints, frameHeight); // Account for OpenCV forced video rotation
         std::vector<PosFrame> trajectory = filterPoints(trackedPoints);
         std::cout << "DONE\n\n";
 
@@ -35,10 +57,10 @@ int main() {
 
         computeCarryAndAngle(trajectory, carry, angle, ballDiameter, fps);
 
-        std::cout << "===================================\n";
+        std::cout << "==============================\n";
         std::cout << "Carry Distance (m): " << carry << std::endl;
         std::cout << "Launch Angle (deg): " << angle << std::endl;
-        std::cout << "===================================";
+        std::cout << "==============================";
     }
     catch (const std::runtime_error& ex) {
         std::cerr << ex.what();

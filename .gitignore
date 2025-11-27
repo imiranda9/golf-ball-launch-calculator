@@ -40,5 +40,15 @@
 # debug information files
 *.dwo
 
+# Build files
 *.bat
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+wcurl*
+
+# Environment
+.vscode/
 *.json
