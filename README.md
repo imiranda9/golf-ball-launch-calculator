@@ -16,10 +16,10 @@ Features
 
 Project Structure
 -----------------
-include/        - Header files
-src/            - Source code
-assets/         - Sample input video and example output
-CMakeLists.txt  - Build configuration
+ - include/        - Header files
+ - src/            - Source code
+ - assets/         - Sample input video and example output
+ - CMakeLists.txt  - Build configuration
 
 Requirements
 -----------
