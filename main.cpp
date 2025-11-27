@@ -4,31 +4,41 @@
 int main() {
     try {
         cv::ocl::setUseOpenCL(true);
-        cv::VideoCapture vid("white_240.mov");
-        // cv::VideoCapture vid162("yellow_162.mov");
+        cv::VideoCapture vid("vid240.mov");
 
         if (!vid.isOpened())
             throw std::runtime_error("[main]: Failed to open video.");
 
-        /********************************
-         *  vid240 impact frame = 498
-         *  vid162 impact frame = 149
-        ********************************/
-        // int index = findImpactFrameIndex(vid);
-        // cv::Rect boundingBox = getBoundingBox(vid, index);
+        int frameHeight = vid.get(cv::CAP_PROP_FRAME_HEIGHT);
 
-        cv::Rect boundingBox = getBoundingBox(vid, 498);
+        std::cout << "Computing FPS:            ";
+        int fps = computeFPS(vid);
+        std::cout << "DONE\n";
 
-        vid.set(cv::CAP_PROP_POS_FRAMES, 498);
-        cv::Mat impactFrame;
-        vid.read(impactFrame);
-        cv::rectangle(impactFrame, boundingBox, cv::Scalar(0, 0, 255), 2);
-        // cv::rotate(impactFrame, impactFrame, cv::ROTATE_90_CLOCKWISE);
-        // cv::resize(impactFrame, impactFrame, cv::Size(), 0.4, 0.4);
-        cv::imshow("box?", impactFrame);
-        cv::waitKey(0);
+        std::cout << "Finding Impact Frame:     ";
+        int impactIndex = findImpactFrameIndex(vid);
+        std::cout << "DONE\n";
 
-        std::vector<cv::Point2f> trajectory = trackBallTrajectory(vid, 498, boundingBox);
+        std::cout << "Creating Bounding Box:    ";
+        cv::Rect boundingBox = getBoundingBox(vid, impactIndex);
+        std::cout << "DONE\n";
+
+        std::cout << "Tracking Ball Trajectory: ";
+        std::vector<PosFrame> trackedPoints = getBallTrajectory(vid, impactIndex, boundingBox);
+        rotatePointVector(trackedPoints, frameHeight);
+        std::vector<PosFrame> trajectory = filterPoints(trackedPoints);
+        std::cout << "DONE\n\n";
+
+        float ballDiameter = (boundingBox.width + boundingBox.height) / 2.0;
+        float carry = 0.0;
+        float angle = 0.0;
+
+        computeCarryAndAngle(trajectory, carry, angle, ballDiameter, fps);
+
+        std::cout << "===================================\n";
+        std::cout << "Carry Distance (m): " << carry << std::endl;
+        std::cout << "Launch Angle (deg): " << angle << std::endl;
+        std::cout << "===================================";
     }
     catch (const std::runtime_error& ex) {
         std::cerr << ex.what();
