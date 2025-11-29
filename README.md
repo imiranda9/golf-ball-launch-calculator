@@ -71,8 +71,8 @@ videos into landscape on load. As a result, parts of the pipeline were designed
 specifically to compensate for this forced rotation and the altered coordinate
 space.
 
-Additionally, the video must include the golfer’s full backswing. The
-`findImpactFrame` function intentionally skips the beginning portion of the file
+Additionally, the video must include the golfer’s full backswing. The logic responsible
+for locating the point of contact intentionally skips the beginning portion of the video
 to avoid misidentifying early club movements as ball impact. This behavior is
 tuned for the test video and may not generalize to all swing recordings.
 
@@ -94,21 +94,24 @@ There are several areas where the system could be expanded or refined to improve
 accuracy and general applicability beyond the constraints of the test footage.
 
 1. Orientation Detection
+   
    The current implementation includes special handling for portrait mode input
    because OpenCV automatically rotates such videos into landscape. A future
    version should detect video orientation and adjust processing steps
    accordingly, removing the need to hardcode orientation assumptions.
 
-3. Improved Impact Frame Detection
-   The `findImpactFrameIndex` function currently relies on averaging motion
-   vectors across frames to infer the moment of ball contact. While functional,
-   this approach is inefficient and not fully reliable in scenes where other
-   motion (hands, hips, club, etc) dominates. A more robust method could
-   incorporate references to static frames where the ball is known not to be
-   moving, and compare them against motion and color masks to reject
-   unrelated motion. This would greatly improve both speed and accuracy.
+2. Improved Impact Frame Detection
+   
+   The current implementation relies on averaging motion vectors across frames
+   to infer the moment of ball contact. While functional, this approach is
+   inefficient and not fully reliable in scenes where other motion (hands, hips,
+   club, etc) dominates. A more robust method could incorporate references to
+   static frames where the ball is known to not be moving, and compare them
+   against motion and color masks to reject unrelated motion. This would greatly
+   improve both speed and accuracy.
 
-5. More Generalized Tracking
+3. More Generalized Tracking
+   
    The existing tracking pipeline was designed specifically to compensate for
    the limitations of the test video: low resolution, low framerate, and only
    four frames of visible ball flight. Traditional trackers such as CSRT or MIL
@@ -119,7 +122,8 @@ accuracy and general applicability beyond the constraints of the test footage.
    - Training a small model for ball segmentation instead of color + motion masks
    - A GUI that shows the trajectory plot
 
-6. Broader Dataset and Calibration
+4. Broader Dataset and Calibration
+   
    Additional videos captured at higher framerates with clearer ball motion would
    allow for more generalizable logic and better parameter tuning. With more diverse
    example footage, the project could be built to produce more reliable speed, distance,
